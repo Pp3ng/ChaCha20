@@ -1,36 +1,23 @@
-# ChaCha20 Cipher Implementation in C
-
-<p align="center">
-    <a href="https://opensource.org/licenses/MIT">
-        <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
-    </a>
-    <a href="https://en.wikipedia.org/wiki/C99">
-        <img src="https://img.shields.io/badge/C-C99-blue.svg" alt="C Standard">
-    </a>
-    <a href="https://tools.ietf.org/rfc/rfc7539.txt">
-        <img src="https://img.shields.io/badge/RFC%207539-Compliant-green.svg" alt="RFC Compliance">
-    </a>
-</p>
+# ChaCha20 Stream Cipher implementation in C
 
 A complete ChaCha20 stream cipher implementation in C, compliant with RFC 7539 standards.
 
 ## Core Components
 
-### 1. ChaCha20 Encryption Library (`src/`)
+### ChaCha20 Library (`src/`)
 
 Core ChaCha20 algorithm implementation:
 
-- **`chacha20.h`** - Public API interface definition
-- **`chacha20.c`** - ChaCha20 algorithm core implementation
+- **`chacha20.h`** - API specification and type definitions
+- **`chacha20.c`** - Core algorithm implementation
 
 ### 2. CC20Crypt File Encryption Tool (`cc20crypt.c`)
 
 Command-line file encryption tool built on the ChaCha20 library:
 
-- **Automatic Key Generation** - Uses `/dev/urandom` to generate cryptographically secure random keys
-- **Stream File Processing** - Efficiently handles files of any size with 8KB buffer
-- **Secure Random Numbers** - Automatically generates and manages nonce (number used once)
-- **Progress Display** - Real-time encryption/decryption progress
+- **Secure Key Generation** - Uses `/dev/urandom` entropy source
+- **Stream Processing** - 8KB buffering for memory efficiency
+- **Nonce Management** - Automatic unique nonce generation
 
 #### Usage
 
@@ -53,94 +40,151 @@ Simple usage example demonstrating basic encryption/decryption operations
 
 Comprehensive test program ensuring implementation correctness:
 
-- **RFC 7539 Standard Tests** - Validates consistency with official test vectors
-- **Basic Functionality Tests** - Tests encryption/decryption cycles
-- **Counter Operation Tests** - Validates counter reset functionality
-- **Stream Processing Tests** - Tests multi-block message processing
-- **Boundary Condition Tests** - Tests special cases like zero-length data
+- **RFC 7539 Compliance** - Official test vector validation
+- **Functional Testing** - Operational integrity verification
+- **Boundary Testing** - Edge cases and error handling
+- **Performance Testing** - Complexity validation
 
 ## Project Structure
 
 ```
 .
 ├── src/
-│   ├── chacha20.h          # ChaCha20 API interface definition
-│   └── chacha20.c          # ChaCha20 core algorithm implementation
-├── cc20crypt.c             # CC20Crypt file encryption tool source code
-├── test_chacha20.c         # Test suite (includes RFC 7539 test vectors)
-├── example.c               # Simple usage example
-├── Makefile               # Build configuration file
-└── README.md              # Project documentation
+│   ├── chacha20.h          # API specification
+│   └── chacha20.c          # Core implementation
+├── cc20crypt.c             # File encryption utility
+├── test_chacha20.c         # Test suite
+├── example.c               # Usage examples
+├── Makefile               # Build configuration
+└── README.md              # Documentation
 ```
 
-## Build and Run
+## Mathematical Foundation and Algorithmic Analysis
 
-### Build All Targets
+### State Matrix Representation
 
-```bash
-make all
-```
+The ChaCha20 algorithm operates on a 4×4 state matrix $\mathbf{S}$, where each element represents a 32-bit word. The initial state configuration follows the standardized construction:
 
-This will build the following programs:
+$$
+\mathbf{S}_{\text{initial}} = \begin{bmatrix}
+\text{0x61707865} & \text{0x3320646e} & \text{0x79622d32} & \text{0x6b206574} \\
+k_0 & k_1 & k_2 & k_3 \\
+k_4 & k_5 & k_6 & k_7 \\
+\text{counter} & n_0 & n_1 & n_2
+\end{bmatrix}
+$$
 
-- `test_chacha20` - Test suite
-- `example` - Example program
-- `cc20crypt` - File encryption tool
+Where the constituent elements are defined as:
 
-### Run Tests
+- Row 0: ASCII encoding of "expand 32-byte k" (constant values)
+- Rows 1-2: 256-bit key $K$ partitioned into eight 32-bit words $k_i$
+- Row 3: 32-bit block counter and 96-bit nonce $N$ partitioned into three 32-bit words $n_i$
 
-```bash
-make test
-```
+### Quarter Round Primitive Operation
 
-### Clean Build Files
+The fundamental computational unit is the quarter round function $QR(a,b,c,d)$, operating on four 32-bit words with the following transformation sequence:
 
-```bash
-make clean
-```
+$$
+\begin{align}
+a &\leftarrow a + b; \quad d \leftarrow (d \oplus a) \lll 16 \\
+c &\leftarrow c + d; \quad b \leftarrow (b \oplus c) \lll 12 \\
+a &\leftarrow a + b; \quad d \leftarrow (d \oplus a) \lll 8 \\
+c &\leftarrow c + d; \quad b \leftarrow (b \oplus c) \lll 7
+\end{align}
+$$
 
-## ChaCha20 API Reference
+### Block Transformation Function
 
-### Context Management
+Each ChaCha20 block undergoes 20 rounds of transformations, organized as 10 double rounds. Each double round consists of:
+
+**Column Round Operations:**
+$$QR(S_0, S_4, S_8, S_{12}), QR(S_1, S_5, S_9, S_{13}), QR(S_2, S_6, S_{10}, S_{14}), QR(S_3, S_7, S_{11}, S_{15})$$
+
+**Diagonal Round Operations:**
+$$QR(S_0, S_5, S_{10}, S_{15}), QR(S_1, S_6, S_{11}, S_{12}), QR(S_2, S_7, S_8, S_{13}), QR(S_3, S_4, S_9, S_{14})$$
+
+The complete block transformation follows this procedure:
+
+1. **State Initialization**: $\mathbf{W} \leftarrow \mathbf{S}_{\text{initial}}$
+2. **Round Processing**: Apply 10 double rounds to $\mathbf{W}$
+3. **State Addition**: $\mathbf{W} \leftarrow \mathbf{W} + \mathbf{S}_{\text{initial}}$
+4. **Serialization**: Convert $\mathbf{W}$ to little-endian byte sequence
+5. **Counter Increment**: Increment block counter for subsequent operations
+
+The final keystream block is computed as:
+
+$$
+Keystream = Serialize(S_{initial} + W_{20})
+$$
+
+$W_{20}$ represents the working state after 20 transformation rounds.
+
+## API Specification and Usage
+
+### Context Management Operations
+
+The implementation provides structured context management for maintaining cipher state:
 
 ```c
 #include "src/chacha20.h"
 
-// Create new context
+// Context instantiation
 chacha20_ctx *ctx = chacha20_new();
 
-// Free context after use
+// Context deallocation
 chacha20_free(ctx);
 ```
 
-### Initialization
+### Initialization Procedures
+
+Context initialization requires specification of cryptographic parameters:
 
 ```c
-uint8_t key[CHACHA20_KEY_SIZE] = { /* 32-byte key */ };
-uint8_t nonce[CHACHA20_NONCE_SIZE] = { /* 12-byte nonce */ };
-uint32_t counter = 0; // Counter, usually starts from 0 or 1
+uint8_t key[CHACHA20_KEY_SIZE] = { /* 256-bit key material */ };
+uint8_t nonce[CHACHA20_NONCE_SIZE] = { /* 96-bit nonce */ };
+uint32_t counter = 0; // Initial block counter value
 
 chacha20_init(ctx, key, nonce, counter);
 ```
 
-### Encryption/Decryption Operations
+### Cryptographic Operations
+
+The implementation provides symmetric encryption and decryption operations using bitwise XOR between data and keystream:
+
+$$C_i = P_i \oplus K_i \quad \text{(Encryption)}$$
+$$P_i = C_i \oplus K_i \quad \text{(Decryption)}$$
 
 ```c
-const uint8_t *plaintext = /* input data */;
-uint8_t *ciphertext = /* output buffer */;
-size_t length = /* data length */;
+const uint8_t *plaintext = /* input data buffer */;
+uint8_t *ciphertext = /* output data buffer */;
+size_t length = /* data length in bytes */;
 
-// Encrypt (ChaCha20 is symmetric, encryption and decryption use the same function)
+// Encryption operation
 chacha20_encrypt(ctx, plaintext, ciphertext, length);
 
-// Decrypt
+// Decryption operation (functionally identical due to XOR properties)
 chacha20_decrypt(ctx, ciphertext, plaintext, length);
 ```
 
-### Example Usage
+### Counter Management Functions
+
+For stream positioning and operational control:
 
 ```c
+// Counter reset operation
+chacha20_reset_counter(ctx, new_counter_value);
+```
 
+**Important Security Notes:**
+
+- Counter values must maintain uniqueness for identical key-nonce pairs
+- Maximum data volume per key-nonce pair: $(2^{32}-1) \times 64$ bytes ≈ 247.88 GB
+- Counter reset operations are primarily for stream positioning
+- Alternative nonce selection is preferred over counter reuse
+
+## Example Usage
+
+```c
 #include "src/chacha20.h"
 #include <stdio.h>
 #include <string.h>
@@ -191,149 +235,62 @@ int main(void)
 }
 ```
 
-> **Security Note**: In production code, consider using `mlock()` to prevent sensitive data (keys, plaintexts) from being swapped to disk. Remember to call `munlock()` before freeing memory and handle potential failures (requires appropriate privileges on some systems).
+## Nonce Uniqueness and Counter Management
 
-### Counter Reset
+The security of ChaCha20 fundamentally depends on nonce uniqueness. For a given key $K$:
 
-**⚠️ Security Warning**: Counter reset operations require careful consideration to maintain encryption security.
+$$\forall i \neq j: N_i \neq N_j$$
 
-```c
-// Reset counter for stream positioning or re-encryption
-chacha20_reset_counter(ctx, new_counter_value);
-```
+**Operational Constraints:**
 
-**Important Notes:**
+- Maximum of $2^{32}-1$ blocks per key-nonce pair (≈ 247.88 GB)
+- Counter overflow prevention through proactive key rotation
+- Maintenance of counter monotonicity for stream positioning
+- Implementation of counter overflow detection mechanisms
 
-- **Never reuse** the same counter value with the same key/nonce pair for different data
-- Counter reset is primarily for **stream positioning** (jumping to specific positions in large streams)
-- When decrypting, reset counter to the **same value** used during encryption
-- For the same key/nonce pair, counter values should be **monotonically increasing**
-- When possible, consider using different nonces instead of resetting counters
+## Side-Channel Mitigation
 
-### Secure Cleanup
+**Constant-Time Operations:**
+The quarter round operations maintain constant execution time:
+$$T_{QR} \text{ is independent of secret input values}$$
 
-```c
-// Clear sensitive data from context
-chacha20_clear(ctx);
-```
+- Data-independent execution patterns
+- Avoidance of secret-dependent conditional branches
+- Cache-timing attack resistance through algorithmic design
 
-## Test Coverage
+### Performance Analysis
 
-The test suite includes the following test categories:
+The encryption demonstrates linear time complexity and predictable performance:
 
-### 1. RFC 7539 Standard Compliance Tests
+$$T_{\text{encrypt}}(n) \approx \lceil \frac{n}{64} \rceil \times T_{\text{block}} + T_{\text{setup}}$$
 
-- **Keystream Generation Tests** - Validates ChaCha20 block function
-- **Encryption Tests** - Verifies complete encryption/decryption using official test vectors
+**Key Advantages:**
 
-### 2. Functional Tests
+- Superior software performance compared to AES without hardware acceleration
+- Minimal computational overhead and memory footprint
+- Parallel processing compatibility and scalability
+- Inherent resistance to differential and linear cryptanalytic attacks
 
-- **Basic Operation Tests** - Basic encryption/decryption cycles
-- **Counter Operation Tests** - Counter reset and management
-- **Stream Processing Tests** - Multi-block messages and chunked processing
+## Applications and Use Cases
 
-### 3. Boundary and Error Tests
+ChaCha20 demonstrates superior characteristics for various deployment scenarios:
 
-- **Zero-Length Data** - Handling empty data
-- **Context Cleanup** - Secure memory clearing
-- **Error Handling** - Null pointers and invalid parameters
+- **Network Communication**: High-performance TLS alternative without hardware acceleration requirements
+- **File System Encryption**: Memory-efficient processing for large-scale file operations
+- **Embedded Systems**: Minimal computational overhead and reduced memory footprint
+- **High-Performance Computing**: Superior software performance and parallel processing compatibility
 
-Run `make test` to execute all tests. All tests must pass to indicate a valid implementation.
+## Future Development and Extensions
 
-## Security Considerations
+## References and Standards
 
-### 1. Key Management
+- [RFC 7539: ChaCha20 and Poly1305 for IETF Protocols](https://tools.ietf.org/rfc/rfc7539.txt) - Official Internet Engineering Task Force specification
+- [RFC 7905: ChaCha20 and Poly1305 based Cipher Suites for TLS](https://tools.ietf.org/rfc/rfc7905.txt) - Transport Layer Security integration specification
 
-- Use cryptographically secure random number generators
-- Clean key data from memory promptly
-- Avoid long-term key persistence in the system
-
-### 2. Nonce Uniqueness
-
-- **Never reuse** nonces with the same key
-- Use high-quality random sources (like `/dev/urandom`)
-- Ensure statistical quality of nonce distribution
-
-### 3. Counter Management
-
-- Avoid counter overflow for the same key/nonce pair
-- Maintain monotonicity when resetting counters
-- Consider key rotation for long-term use
-
-### 4. Memory Safety
-
-- Immediately clear sensitive data after use
-- Prevent sensitive data from entering swap files
-- Consider secure memory allocation
-
-### 5. Side-Channel Protection
-
-- Implementation has constant-time characteristics
-- Avoid secret-data-dependent branches
-- Consider cache timing attack protection
-
-## Use Cases
-
-ChaCha20 is suitable for the following scenarios:
-
-- **Network Communication Encryption** - High-performance alternative to AES
-- **File Encryption** - Stream encryption for large files
-- **Stream Data Encryption** - Real-time data stream encryption
-- **Embedded Systems** - Encryption needs in resource-constrained environments
-- **High-Performance Scenarios** - Where software implementation outperforms AES
-
-## Example Code
-
-### Basic Usage Example
-
-#file:example.c
-
-### Performance Characteristics
-
-- **High Security** - Resistant to differential and linear cryptanalysis
-- **High Performance** - Software implementation faster than AES
-- **Simple Design** - Easy to implement and verify correctness
-- **Side-Channel Resistance** - Designed for constant-time implementation
-
-## License
-
-This implementation is released under the MIT License. Free to use, modify, and distribute.
-
-## References
-
-- [RFC 7539: ChaCha20 and Poly1305 for IETF Protocols](https://tools.ietf.org/rfc/rfc7539.txt)
-- [RFC 7905: ChaCha20 and Poly1305 based Cipher Suites for TLS](https://tools.ietf.org/rfc/rfc7905.txt)
-- [Daniel J. Bernstein's ChaCha20 specification](https://cr.yp.to/chacha.html)
-- [Original ChaCha paper](https://cr.yp.to/chacha/chacha-20080128.pdf)
-
-## Contributing
-
-Contributions welcome! Please ensure:
-
-- All tests pass (`make test`)
-- Code follows existing style
-- New features include appropriate tests
-- Documentation updated accordingly
+- [Daniel J. Bernstein's ChaCha20 specification](https://cr.yp.to/chacha.html) - Original algorithm specification and analysis
+- [Original ChaCha paper](https://cr.yp.to/chacha/chacha-20080128.pdf) - Foundational cryptographic research publication
 
 ## TODO
 
 - [ ] ChaCha20-Poly1305 AEAD Support - Add authenticated encryption mode
 - [ ] Key Derivation Function - Integrate PBKDF2/Argon2 support for secure key generation
-
-## FAQ
-
-### Q: What advantages does ChaCha20 have over AES?
-
-A: ChaCha20 is typically faster than AES in software implementations, has a simpler design, is easier to implement in constant time, and doesn't require dedicated hardware support.
-
-### Q: Can this implementation be used in production?
-
-A: Yes, this implementation passes all RFC 7539 test vectors, includes comprehensive test coverage, and is suitable for production use. However, independent security auditing is recommended for critical applications.
-
-### Q: How to securely generate keys and nonces?
-
-A: Use cryptographically secure random number generators, such as Linux's `/dev/urandom` or OpenSSL's RAND_bytes(). Never use regular rand() function.
-
-### Q: What happens when the counter overflows?
-
-A: Counter overflow causes keystream repetition, which is insecure. For long-term use, keys should be changed or different nonces should be used.
