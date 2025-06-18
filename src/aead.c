@@ -501,3 +501,14 @@ bool aead_stream_open_final(aead_stream_ctx *ctx, const uint8_t tag[AEAD_TAG_SIZ
 
     return result;
 }
+
+// Key and nonce generation utilities
+bool aead_keygen(uint8_t key[AEAD_KEY_SIZE])
+{
+    return chacha20_keygen(key);
+}
+
+bool aead_noncegen(uint8_t nonce[AEAD_NONCE_SIZE])
+{
+    return chacha20_noncegen(nonce);
+}

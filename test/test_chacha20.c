@@ -8,7 +8,7 @@ static chacha20_ctx *create_context(void)
     chacha20_ctx *ctx = chacha20_new();
     if (!ctx)
     {
-        printf("❌ Failed to create ChaCha20 context\n");
+        printf("✗ Failed to create ChaCha20 context\n");
         exit(EXIT_FAILURE);
     }
     return ctx;

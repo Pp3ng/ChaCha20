@@ -8,7 +8,7 @@ static poly1305_ctx *create_context(void)
     poly1305_ctx *ctx = poly1305_new();
     if (!ctx)
     {
-        printf("❌ Failed to create Poly1305 context\n");
+        printf("✗ Failed to create Poly1305 context\n");
         exit(EXIT_FAILURE);
     }
     return ctx;

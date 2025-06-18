@@ -69,6 +69,12 @@ extern "C"
     // Finalize streaming opening and verify authentication tag
     bool aead_stream_open_final(aead_stream_ctx *ctx, const uint8_t tag[AEAD_TAG_SIZE]);
 
+    // Generate cryptographically secure random key for AEAD
+    bool aead_keygen(uint8_t key[AEAD_KEY_SIZE]);
+
+    // Generate cryptographically secure random nonce for AEAD
+    bool aead_noncegen(uint8_t nonce[AEAD_NONCE_SIZE]);
+
 #ifdef __cplusplus
 }
 #endif

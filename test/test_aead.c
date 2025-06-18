@@ -1,5 +1,4 @@
 #include "../src/aead.h"
-#include "../src/chacha20.h"
 #include "test_common.h"
 
 TestStats stats = {0};
@@ -9,7 +8,7 @@ static aead_stream_ctx *create_stream_context(void)
     aead_stream_ctx *ctx = aead_stream_new();
     if (!ctx)
     {
-        printf("❌ Failed to create AEAD stream context\n");
+        printf("✗ Failed to create AEAD stream context\n");
         exit(EXIT_FAILURE);
     }
     return ctx;
@@ -71,8 +70,8 @@ TEST(streaming_interface)
     uint8_t nonce[12];
 
     // Generate random key and nonce
-    ASSERT(chacha20_keygen(key), "Key generation succeeds");
-    ASSERT(chacha20_noncegen(nonce), "Nonce generation succeeds");
+    ASSERT(aead_keygen(key), "Key generation succeeds");
+    ASSERT(aead_noncegen(nonce), "Nonce generation succeeds");
 
     const char *message = "This is a test message for streaming AEAD encryption and decryption.";
     size_t msg_len = strlen(message);
@@ -128,8 +127,8 @@ TEST(empty_message)
     uint8_t key[32];
     uint8_t nonce[12];
 
-    ASSERT(chacha20_keygen(key), "Key generation for empty message test");
-    ASSERT(chacha20_noncegen(nonce), "Nonce generation for empty message test");
+    ASSERT(aead_keygen(key), "Key generation for empty message test");
+    ASSERT(aead_noncegen(nonce), "Nonce generation for empty message test");
 
     // Seal empty message
     uint8_t output[16];
@@ -149,8 +148,8 @@ TEST(basic_operations)
     uint8_t *output = malloc(msg_len + 16); // message + tag
     uint8_t *decrypted = malloc(msg_len);
 
-    ASSERT(chacha20_keygen(key), "Basic key generation");
-    ASSERT(chacha20_noncegen(nonce), "Basic nonce generation");
+    ASSERT(aead_keygen(key), "Basic key generation");
+    ASSERT(aead_noncegen(nonce), "Basic nonce generation");
 
     // Basic sealing
     ASSERT(aead_seal(key, nonce, NULL, 0, (uint8_t *)message, msg_len, output), "Basic sealing");
@@ -179,8 +178,8 @@ TEST(aad_operations)
     uint8_t key[32];
     uint8_t nonce[12];
 
-    ASSERT(chacha20_keygen(key), "Key generation for AAD test");
-    ASSERT(chacha20_noncegen(nonce), "Nonce generation for AAD test");
+    ASSERT(aead_keygen(key), "Key generation for AAD test");
+    ASSERT(aead_noncegen(nonce), "Nonce generation for AAD test");
 
     const char *message = "Hello, with AAD!";
     size_t msg_len = strlen(message);
