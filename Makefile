@@ -1,52 +1,59 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -O2 -g -Isrc
+CFLAGS = -Wall -Wextra -std=c99 -O2 -Isrc
 LDFLAGS = 
 
 # Source files
 SRCDIR = src
-SOURCES = $(SRCDIR)/chacha20.c
-HEADERS = $(SRCDIR)/chacha20.h
-OBJECTS = $(SOURCES:.c=.o)
+SOURCES = $(SRCDIR)/chacha20.c $(SRCDIR)/poly1305.c $(SRCDIR)/common.c $(SRCDIR)/aead.c
+HEADERS = $(SRCDIR)/chacha20.h $(SRCDIR)/poly1305.h $(SRCDIR)/common.h $(SRCDIR)/aead.h
+
+# Directories
+TESTDIR = test
 
 # Targets
-TARGETS = test_chacha20 example cc20crypt
+TARGETS = $(TESTDIR)/test_chacha20 $(TESTDIR)/test_poly1305 $(TESTDIR)/test_aead vault
 
 .PHONY: all clean test
 
 all: $(TARGETS)
 
-# Build test program
-test_chacha20: test_chacha20.o $(OBJECTS)
-	$(CC) $(LDFLAGS) -o $@ $^
+# Build test programs
+$(TESTDIR)/test_chacha20: $(TESTDIR)/test_chacha20.c $(SOURCES) $(HEADERS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(TESTDIR)/test_chacha20.c $(SOURCES)
 
-# Build example program
-example: example.o $(OBJECTS)
-	$(CC) $(LDFLAGS) -o $@ $^
+$(TESTDIR)/test_poly1305: $(TESTDIR)/test_poly1305.c $(SOURCES) $(HEADERS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(TESTDIR)/test_poly1305.c $(SOURCES)
 
-# Build file encryption tool
-cc20crypt: cc20crypt.o $(OBJECTS)
-	$(CC) $(LDFLAGS) -o $@ $^
+$(TESTDIR)/test_aead: $(TESTDIR)/test_aead.c $(SOURCES) $(HEADERS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(TESTDIR)/test_aead.c $(SOURCES)
 
-# Object files
-%.o: %.c $(HEADERS)
-	$(CC) $(CFLAGS) -c -o $@ $<
-
-# Run tests
-test: test_chacha20
-	./test_chacha20
+# Build vault encryption tool
+vault: vault.c $(SOURCES) $(HEADERS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ vault.c $(SOURCES)
 
 # Clean build artifacts
 clean:
-	rm -f $(OBJECTS) test_chacha20.o example.o cc20crypt.o $(TARGETS)
+	rm -f $(TARGETS)
+
+# Run tests
+test: $(TESTDIR)/test_chacha20 $(TESTDIR)/test_poly1305 $(TESTDIR)/test_aead
+	./$(TESTDIR)/test_chacha20
+	./$(TESTDIR)/test_poly1305
+	./$(TESTDIR)/test_aead
 
 # Install (optional, copies to /usr/local)
 install: all
 	install -d /usr/local/include
 	install -m 644 $(SRCDIR)/chacha20.h /usr/local/include/
+	install -m 644 $(SRCDIR)/poly1305.h /usr/local/include/
 	install -d /usr/local/lib
-	ar rcs libchacha20.a $(OBJECTS)
+	$(CC) $(CFLAGS) -c $(SOURCES)
+	ar rcs libchacha20.a *.o
+	rm -f *.o
 	install -m 644 libchacha20.a /usr/local/lib/
 
 # Create static library
-libchacha20.a: $(OBJECTS)
-	ar rcs $@ $^
+libchacha20.a: $(SOURCES) $(HEADERS)
+	$(CC) $(CFLAGS) -c $(SOURCES)
+	ar rcs $@ *.o
+	rm -f *.o

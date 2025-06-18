@@ -1,4 +1,5 @@
 #include "chacha20.h"
+#include "common.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -7,10 +8,9 @@
 #define CHACHA20_ROUNDS 20
 #define CHACHA20_DOUBLE_ROUNDS (CHACHA20_ROUNDS / 2)
 
-// ChaCha20 magic constants
+// ChaCha20 constants: "expand 32-byte k"
 static const uint32_t CHACHA20_SIGMA[4] = {
-    0x61707865, 0x3320646e, 0x79622d32, 0x6b206574 // "expand 32-byte k"
-};
+    0x61707865, 0x3320646e, 0x79622d32, 0x6b206574};
 
 // State Array Layout
 typedef enum
@@ -21,7 +21,7 @@ typedef enum
     STATE_NONCE_START = 13
 } chacha20_state_layout_t;
 
-// Size Constants (in 32-bit words)
+// Word counts
 typedef enum
 {
     WORDS_IN_KEY = 8,
@@ -36,34 +36,6 @@ struct chacha20_ctx
     uint8_t keystream[CHACHA20_BLOCK_SIZE]; // Current keystream block
     size_t keystream_pos;                   // Position in current keystream
 };
-
-// Utility Functions
-
-// Secure memory clearing to prevent compiler optimization
-static inline void secure_memzero(volatile void *ptr, size_t len)
-{
-    volatile uint8_t *p = (volatile uint8_t *)ptr;
-    // Calm memory
-    while (len--> 0)
-        *p++ = 0;
-}
-
-// Little-endian load/store for 32-bit integers
-static inline uint32_t load32_le(const uint8_t *p)
-{
-    return (uint32_t)p[0] |
-           ((uint32_t)p[1] << 8) |
-           ((uint32_t)p[2] << 16) |
-           ((uint32_t)p[3] << 24);
-}
-
-static inline void store32_le(uint8_t *p, uint32_t x)
-{
-    p[0] = (uint8_t)(x & 0xFF);
-    p[1] = (uint8_t)((x >> 8) & 0xFF);
-    p[2] = (uint8_t)((x >> 16) & 0xFF);
-    p[3] = (uint8_t)((x >> 24) & 0xFF);
-}
 
 // Rotate left for 32-bit integers
 static inline uint32_t rotl32(uint32_t x, unsigned int n)
@@ -82,7 +54,7 @@ static inline void quarter_round(uint32_t *a, uint32_t *b, uint32_t *c, uint32_t
     *c += *d;  *b ^= *c;  *b = rotl32(*b, 7);
 }
 
-// Column rounds: operate on columns of the state matrix
+// Column rounds
 static inline void perform_column_rounds(uint32_t state[WORDS_IN_STATE])
 {
     quarter_round(&state[0], &state[4], &state[8], &state[12]);
@@ -91,7 +63,7 @@ static inline void perform_column_rounds(uint32_t state[WORDS_IN_STATE])
     quarter_round(&state[3], &state[7], &state[11], &state[15]);
 }
 
-// Diagonal rounds: operate on diagonals of the state matrix
+// Diagonal rounds
 static inline void perform_diagonal_rounds(uint32_t state[WORDS_IN_STATE])
 {
     quarter_round(&state[0], &state[5], &state[10], &state[15]);
@@ -100,27 +72,27 @@ static inline void perform_diagonal_rounds(uint32_t state[WORDS_IN_STATE])
     quarter_round(&state[3], &state[4], &state[9], &state[14]);
 }
 
-// Generate a 64-byte keystream block from current state
+// Generate keystream block
 static void generate_keystream_block(chacha20_ctx *ctx)
 {
     uint32_t working_state[WORDS_IN_STATE];
 
-    // Copy state to working state
+    // Copy to working state
     memcpy(working_state, ctx->state, sizeof(working_state));
 
-    // Perform 20 rounds (10 double rounds) of ChaCha20 transformation
-    for (int round = 0; round < CHACHA20_DOUBLE_ROUNDS; round++)
+    // 20 rounds (10 double rounds)
+    for (size_t round = 0; round < CHACHA20_DOUBLE_ROUNDS; round++)
     {
         perform_column_rounds(working_state);
         perform_diagonal_rounds(working_state);
     }
 
-    // Add original state to working state
-    for (int i = 0; i < WORDS_IN_STATE; i++)
+    // Add original state
+    for (size_t i = 0; i < WORDS_IN_STATE; i++)
         working_state[i] += ctx->state[i];
 
-    // Serialize working state to little-endian keystream bytes
-    for (int i = 0; i < WORDS_IN_STATE; i++)
+    // Serialize to little-endian bytes
+    for (size_t i = 0; i < WORDS_IN_STATE; i++)
         store32_le(ctx->keystream + (i << 2), working_state[i]);
 
     // Increment counter and reset keystream position
@@ -128,20 +100,20 @@ static void generate_keystream_block(chacha20_ctx *ctx)
     ctx->keystream_pos = 0;
 
     // Securely clear the working state
-    secure_memzero(working_state, sizeof(working_state));
+    memwipe(working_state, sizeof(working_state));
 }
 
 // Core stream cipher processing: XOR input with keystream
 static void process_stream_cipher(chacha20_ctx *ctx, const uint8_t *input,
-                                  uint8_t *output, size_t length)
+                                  uint8_t *output, size_t data_len)
 {
     // Early return for invalid parameters
-    if (!ctx || !input || !output || length == 0)
+    if (!ctx || !input || !output || data_len == 0)
         return;
 
     size_t processed = 0;
 
-    while (processed < length)
+    while (processed < data_len)
     {
         // Generate fresh keystream block if current one is exhausted
         if (ctx->keystream_pos >= CHACHA20_BLOCK_SIZE)
@@ -149,7 +121,7 @@ static void process_stream_cipher(chacha20_ctx *ctx, const uint8_t *input,
 
         // Calculate optimal chunk size for this iteration
         const size_t keystream_available = CHACHA20_BLOCK_SIZE - ctx->keystream_pos;
-        const size_t data_remaining = length - processed;
+        const size_t data_remaining = data_len - processed;
         const size_t chunk_size = (keystream_available < data_remaining)
                                       ? keystream_available
                                       : data_remaining;
@@ -198,42 +170,43 @@ void chacha20_init(chacha20_ctx *ctx, const uint8_t key[CHACHA20_KEY_SIZE],
     memcpy(ctx->state, CHACHA20_SIGMA, sizeof(CHACHA20_SIGMA));
 
     // Load 256-bit key into state (8 words)
-    for (int i = 0; i < WORDS_IN_KEY; i++)
+    for (size_t i = 0; i < WORDS_IN_KEY; i++)
         ctx->state[STATE_KEY_START + i] = load32_le(key + (i << 2));
 
     // Set initial counter value
     ctx->state[STATE_COUNTER_INDEX] = counter;
 
     // Load 96-bit nonce into state (3 words)
-    for (int i = 0; i < WORDS_IN_NONCE; i++)
+    for (size_t i = 0; i < WORDS_IN_NONCE; i++)
         ctx->state[STATE_NONCE_START + i] = load32_le(nonce + (i << 2));
 
     // Force keystream generation on first use
     ctx->keystream_pos = CHACHA20_BLOCK_SIZE;
 }
 
-// Encrypt data (ChaCha20 is symmetric: encrypt = decrypt)
+// Encrypt data
 void chacha20_encrypt(chacha20_ctx *ctx, const uint8_t *plaintext,
-                      uint8_t *ciphertext, size_t length)
+                      uint8_t *ciphertext, size_t data_len)
 {
-    process_stream_cipher(ctx, plaintext, ciphertext, length);
+    process_stream_cipher(ctx, plaintext, ciphertext, data_len);
 }
 
-// Decrypt data (identical to encrypt for stream ciphers)
+// Decrypt data
 void chacha20_decrypt(chacha20_ctx *ctx, const uint8_t *ciphertext,
-                      uint8_t *plaintext, size_t length)
+                      uint8_t *plaintext, size_t data_len)
 {
-    process_stream_cipher(ctx, ciphertext, plaintext, length);
+    process_stream_cipher(ctx, ciphertext, plaintext, data_len);
 }
 
-// Reset counter to specific value (use with caution)
-void chacha20_reset_counter(chacha20_ctx *ctx, uint32_t counter)
+// Reinitialize context with new parameters
+void chacha20_reinit(chacha20_ctx *ctx, const uint8_t key[CHACHA20_KEY_SIZE],
+                     const uint8_t nonce[CHACHA20_NONCE_SIZE], uint32_t counter)
 {
-    if (!ctx)
-        return;
+    // Clear existing state first for security
+    chacha20_clear(ctx);
 
-    ctx->state[STATE_COUNTER_INDEX] = counter;
-    ctx->keystream_pos = CHACHA20_BLOCK_SIZE; // Force fresh keystream
+    // Reinitialize with new parameters
+    chacha20_init(ctx, key, nonce, counter);
 }
 
 // Securely clear all sensitive data from context
@@ -243,7 +216,17 @@ void chacha20_clear(chacha20_ctx *ctx)
         return;
 
     // Zero out all sensitive state data
-    secure_memzero(ctx->state, sizeof(ctx->state));
-    secure_memzero(ctx->keystream, sizeof(ctx->keystream));
+    memwipe(ctx->state, sizeof(ctx->state));
+    memwipe(ctx->keystream, sizeof(ctx->keystream));
     ctx->keystream_pos = CHACHA20_BLOCK_SIZE;
+}
+
+bool chacha20_keygen(uint8_t key[CHACHA20_KEY_SIZE])
+{
+    return get_random_bytes(key, CHACHA20_KEY_SIZE);
+}
+
+bool chacha20_noncegen(uint8_t nonce[CHACHA20_NONCE_SIZE])
+{
+    return get_random_bytes(nonce, CHACHA20_NONCE_SIZE);
 }

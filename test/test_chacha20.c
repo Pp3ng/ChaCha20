@@ -1,48 +1,7 @@
-#include "src/chacha20.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
+#include "../src/chacha20.h"
+#include "test_common.h"
 
-// === Test Framework ===
-typedef struct
-{
-    int total, passed, failed;
-} TestStats;
-static TestStats stats = {0};
-
-#define TEST(name)                       \
-    static void test_##name(void);       \
-    static void run_##name(void)         \
-    {                                    \
-        printf("\n--- %s ---\n", #name); \
-        test_##name();                   \
-    }                                    \
-    static void test_##name(void)
-
-#define ASSERT(condition, message)     \
-    do                                 \
-    {                                  \
-        stats.total++;                 \
-        if (condition)                 \
-        {                              \
-            stats.passed++;            \
-            printf("✓ %s\n", message); \
-        }                              \
-        else                           \
-        {                              \
-            stats.failed++;            \
-            printf("✗ %s\n", message); \
-        }                              \
-    } while (0)
-
-#define RUN_TEST(name) run_##name()
-
-// === Utility Functions ===
-static int compare_bytes(const uint8_t *a, const uint8_t *b, size_t len)
-{
-    return memcmp(a, b, len) == 0;
-}
+TestStats stats = {0};
 
 static chacha20_ctx *create_context(void)
 {
@@ -55,7 +14,6 @@ static chacha20_ctx *create_context(void)
     return ctx;
 }
 
-// === Core Tests ===
 TEST(rfc7539_keystream)
 {
     const uint8_t key[32] = {
@@ -190,8 +148,8 @@ TEST(counter_operations)
     chacha20_init(ctx, key, nonce, 1);
     chacha20_encrypt(ctx, (const uint8_t *)message, encrypted2, msg_len);
 
-    // Reset counter back to 0
-    chacha20_reset_counter(ctx, 0);
+    // Reset counter back to 0 using reinit
+    chacha20_reinit(ctx, key, nonce, 0);
     chacha20_encrypt(ctx, (const uint8_t *)message, encrypted3, msg_len);
 
     ASSERT(!compare_bytes(encrypted1, encrypted2, msg_len), "Different counters produce different output");
@@ -220,7 +178,7 @@ TEST(edge_cases)
 
     chacha20_free(ctx);
 
-    // Test null context operations (implementation dependent)
+    // Test null context operations
     ASSERT(chacha20_new() != NULL, "Context creation succeeds");
 }
 
@@ -269,25 +227,9 @@ TEST(stream_properties)
     chacha20_free(ctx);
 }
 
-// === Test Summary and Main ===
-static void print_summary(void)
-{
-    printf("\n=== Test Summary ===\n");
-    printf("Total: %d | Passed: %d | Failed: %d\n",
-           stats.total, stats.passed, stats.failed);
-    printf("Success Rate: %.1f%%\n",
-           stats.total > 0 ? (100.0 * stats.passed / stats.total) : 0.0);
-
-    if (stats.failed == 0)
-        printf("🎉 All tests passed!\n");
-    else
-        printf("❌ %d test(s) failed\n", stats.failed);
-}
-
 int main(void)
 {
     printf("ChaCha20 Test Suite\n");
-    printf("===================\n");
 
     // Run all test suites
     RUN_TEST(rfc7539_keystream);
@@ -300,5 +242,5 @@ int main(void)
     // Print final results
     print_summary();
 
-    return stats.failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    return get_test_exit_code();
 }
