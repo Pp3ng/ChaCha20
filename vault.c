@@ -3,11 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <errno.h>
 
 #define BUFFER_SIZE 8192
-#define PROGRESS_INTERVAL (BUFFER_SIZE * 10)
-#define PROGRESS_THRESHOLD_KB 1024
 #define EXPECTED_KEY_HEX_LENGTH (AEAD_KEY_SIZE * 2)
 #define MIN_REQUIRED_ARGS 4
 #define ARGS_WITH_KEY 5
@@ -43,35 +40,31 @@ typedef enum
     RESULT_AUTH_FAILED = -2
 } result_t;
 
-// Simplified error handling
-#define FAIL_IF(condition, message)                                                     \
-    do                                                                                  \
-    {                                                                                   \
-        if (condition)                                                                  \
-        {                                                                               \
-            fprintf(stderr, COLOR_RED "%s %s" COLOR_RESET "\n", SYMBOL_ERROR, message); \
-            return RESULT_ERROR;                                                        \
-        }                                                                               \
-    } while (0)
-
-#define FAIL_IF_CLEANUP(condition, message, cleanup, res)                               \
-    do                                                                                  \
-    {                                                                                   \
-        if (condition)                                                                  \
-        {                                                                               \
-            fprintf(stderr, COLOR_RED "%s %s" COLOR_RESET "\n", SYMBOL_ERROR, message); \
-            cleanup(res);                                                               \
-            return RESULT_ERROR;                                                        \
-        }                                                                               \
-    } while (0)
-
-// Operation configuration
-typedef struct
+static void print_error(const char *message)
 {
-    const char *flag;
-    const char *symbol;
-    result_t (*handler)(const char *, const char *, const char *);
-} operation_t;
+    fprintf(stderr, COLOR_RED "%s %s" COLOR_RESET "\n", SYMBOL_ERROR, message);
+}
+
+#define FAIL_IF(condition, message) \
+    do                              \
+    {                               \
+        if (condition)              \
+        {                           \
+            print_error(message);   \
+            return RESULT_ERROR;    \
+        }                           \
+    } while (0)
+
+#define FAIL_IF_CLEANUP(condition, message, cleanup, res) \
+    do                                                    \
+    {                                                     \
+        if (condition)                                    \
+        {                                                 \
+            print_error(message);                         \
+            cleanup(res);                                 \
+            return RESULT_ERROR;                          \
+        }                                                 \
+    } while (0)
 
 // File processing resources
 typedef struct
@@ -93,29 +86,24 @@ static void cleanup_resources(resources_t *res)
     free(res->output_buffer);
 }
 
-// Progress and status display
-static void show_progress(size_t bytes, const char *op)
+static void format_size(size_t bytes, char *buffer, size_t buffer_size)
 {
-    static size_t last = 0;
-    static const char *last_op = NULL;
-
-    if (last_op != op)
-    {
-        last = 0;
-        last_op = op;
-    }
-    if (bytes - last >= PROGRESS_INTERVAL || bytes == 0)
-    {
-        printf("\r%s %s: %zu KB", SYMBOL_LOCK, op, bytes / PROGRESS_THRESHOLD_KB);
-        fflush(stdout);
-        last = bytes;
-    }
+    if (bytes >= 1024ULL * 1024 * 1024)
+        snprintf(buffer, buffer_size, "%.2f GB", (double)bytes / (1024ULL * 1024 * 1024));
+    else if (bytes >= 1024 * 1024)
+        snprintf(buffer, buffer_size, "%.2f MB", (double)bytes / (1024 * 1024));
+    else if (bytes >= 1024)
+        snprintf(buffer, buffer_size, "%.2f KB", (double)bytes / 1024);
+    else
+        snprintf(buffer, buffer_size, "%zu bytes", bytes);
 }
 
 static void print_success(const char *op, size_t bytes)
 {
-    printf("\n" COLOR_GREEN "%s %s complete! Processed %zu bytes" COLOR_RESET "\n",
-           SYMBOL_SUCCESS, op, bytes);
+    char size_str[32];
+    format_size(bytes, size_str, sizeof(size_str));
+    printf(COLOR_GREEN "%s %s complete! Processed %s" COLOR_RESET "\n",
+           SYMBOL_SUCCESS, op, size_str);
 }
 
 // Initialize file resources
@@ -137,7 +125,7 @@ static result_t init_file_resources(resources_t *res, const char *input_file,
 }
 
 // Common streaming processing loop
-static result_t process_stream_data(resources_t *res, size_t total_size, const char *op,
+static result_t process_stream_data(resources_t *res, size_t total_size,
                                     bool (*update_func)(aead_stream_ctx *, const uint8_t *, size_t, uint8_t *))
 {
     size_t total_processed = 0;
@@ -159,22 +147,22 @@ static result_t process_stream_data(resources_t *res, size_t total_size, const c
                 "Write operation failed");
 
         total_processed += bytes_read;
-        show_progress(total_processed, op);
     }
 
     return RESULT_SUCCESS;
 }
 
 // Get file size
-static long get_file_size(FILE *file)
+static size_t get_file_size(FILE *file)
 {
-    fseek(file, 0, SEEK_END);
+    if (fseek(file, 0, SEEK_END) != 0)
+        return 0;
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
-    return size;
+    return (size >= 0) ? (size_t)size : 0;
 }
 
-static result_t read_file_metadata(FILE *file, long file_size, uint8_t *nonce, uint8_t *tag)
+static result_t read_file_metadata(FILE *file, size_t file_size, uint8_t *nonce, uint8_t *tag)
 {
     FAIL_IF(file_size < AEAD_OVERHEAD_SIZE, "File too small - not a valid encrypted file");
     FAIL_IF(fread(nonce, 1, AEAD_NONCE_SIZE, file) != AEAD_NONCE_SIZE,
@@ -198,13 +186,6 @@ static result_t parse_key_hex(const char *hex_str, uint8_t *key)
     return RESULT_SUCCESS;
 }
 
-// Print hex string
-static void print_hex(const uint8_t *data, size_t len)
-{
-    for (size_t i = 0; i < len; i++)
-        printf("%02x", data[i]);
-}
-
 // Encrypt file with streaming AEAD
 static result_t encrypt_file(const char *input_file, const char *output_file,
                              const uint8_t *key, const uint8_t *nonce)
@@ -222,20 +203,18 @@ static result_t encrypt_file(const char *input_file, const char *output_file,
                     "Failed to initialize AEAD sealing", cleanup_resources, &res);
 
     // Process file data
-    long file_size = get_file_size(res.input);
-    result_t result = process_stream_data(&res, file_size, "Sealing", aead_stream_seal_update);
+    size_t file_size = get_file_size(res.input);
+    result_t result = process_stream_data(&res, file_size, aead_stream_seal_update);
 
     if (result == RESULT_SUCCESS)
     {
         uint8_t tag[AEAD_TAG_SIZE];
         if (aead_stream_seal_final(res.ctx, tag) &&
             fwrite(tag, 1, AEAD_TAG_SIZE, res.output) == AEAD_TAG_SIZE)
-        {
             print_success("Sealing", file_size);
-        }
         else
         {
-            fprintf(stderr, COLOR_RED "%s Failed to finalize sealing" COLOR_RESET "\n", SYMBOL_ERROR);
+            print_error("Failed to finalize sealing");
             result = RESULT_ERROR;
         }
     }
@@ -254,7 +233,7 @@ static result_t decrypt_file(const char *input_file, const char *output_file,
     FAIL_IF(init_file_resources(&res, input_file, output_file) != RESULT_SUCCESS,
             "Failed to initialize resources");
 
-    long file_size = get_file_size(res.input);
+    size_t file_size = get_file_size(res.input);
     FAIL_IF_CLEANUP(read_file_metadata(res.input, file_size, nonce, stored_tag) != RESULT_SUCCESS,
                     "Failed to read file metadata", cleanup_resources, &res);
 
@@ -267,8 +246,7 @@ static result_t decrypt_file(const char *input_file, const char *output_file,
                     "Failed to initialize AEAD opening", cleanup_resources, &res);
 
     // Process and verify
-    printf("%s Opening in progress...\n", SYMBOL_UNLOCK);
-    result_t result = process_stream_data(&res, ciphertext_size, "Opening", aead_stream_open_update);
+    result_t result = process_stream_data(&res, ciphertext_size, aead_stream_open_update);
 
     if (result == RESULT_SUCCESS)
     {
@@ -279,16 +257,14 @@ static result_t decrypt_file(const char *input_file, const char *output_file,
         }
         else
         {
-            fprintf(stderr, COLOR_RED "%s Verification failed - wrong key or corrupted file" COLOR_RESET "\n", SYMBOL_ERROR);
+            print_error("Verification failed - wrong key or corrupted file");
             fprintf(stderr, COLOR_RED "Possible causes: wrong key, corruption, or different tool" COLOR_RESET "\n");
             result = RESULT_AUTH_FAILED;
             unlink(output_file);
         }
     }
     else
-    {
         unlink(output_file);
-    }
 
     cleanup_resources(&res);
     return result;
@@ -296,17 +272,15 @@ static result_t decrypt_file(const char *input_file, const char *output_file,
 
 static void print_usage(const char *program)
 {
-    printf(COLOR_BLUE "🔐 Vault - ChaCha20-Poly1305 AEAD File Encryption Tool" COLOR_RESET "\n\n");
+    printf(COLOR_BLUE "🔐 Vault - ChaCha20-Poly1305 AEAD File Encryption Tool" COLOR_RESET "\n");
 
     printf(COLOR_YELLOW "USAGE:" COLOR_RESET "\n");
     printf("  %s Seal:  %s -s <input> <output> [key]\n", SYMBOL_LOCK, program);
     printf("  %s Open:  %s -o <input> <output> <key>\n", SYMBOL_UNLOCK, program);
-    printf("\n");
 
     printf(COLOR_YELLOW "OPTIONS:" COLOR_RESET "\n");
-    printf("  -s    Seal (encrypts file, generates random key if not provided)\n");
-    printf("  -o    Open (decrypts file, requires key)\n");
-    printf("\n");
+    printf("  -s    Seal (encrypt and authenticate file, generates random key if not provided)\n");
+    printf("  -o    Open (decrypt file and verify authentication tag, requires key)\n");
 
     printf(COLOR_YELLOW "EXAMPLES:" COLOR_RESET "\n");
     printf("  %s -s document.pdf document.enc\n", program);
@@ -320,14 +294,13 @@ static result_t handle_seal(const char *input_file, const char *output_file,
     uint8_t key[AEAD_KEY_SIZE], nonce[AEAD_NONCE_SIZE];
 
     if (key_str)
-    {
         FAIL_IF(parse_key_hex(key_str, key) != RESULT_SUCCESS, "Invalid key format");
-    }
     else
     {
         FAIL_IF(!aead_keygen(key), "Failed to generate random key");
         printf(COLOR_RED "Key: ");
-        print_hex(key, AEAD_KEY_SIZE);
+        for (size_t i = 0; i < AEAD_KEY_SIZE; i++)
+            printf("%02x", key[i]);
         printf("\nSave this key - it's required for decryption!" COLOR_RESET "\n\n");
     }
 
@@ -350,22 +323,6 @@ static result_t handle_open(const char *input_file, const char *output_file,
     return decrypt_file(input_file, output_file, key);
 }
 
-static const operation_t modes[] = {
-    {"-s", SYMBOL_LOCK, handle_seal},
-    {"-o", SYMBOL_UNLOCK, handle_open},
-    {NULL, NULL, NULL} // Sentinel
-};
-
-static const operation_t *find_mode(const char *mode_str)
-{
-    for (const operation_t *mode = modes; mode->flag; mode++)
-    {
-        if (strcmp(mode_str, mode->flag) == 0)
-            return mode;
-    }
-    return NULL;
-}
-
 int main(int argc, char *argv[])
 {
     if (argc < MIN_REQUIRED_ARGS)
@@ -374,20 +331,22 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    const char *mode_str = argv[ARG_MODE];
+    const char *mode = argv[ARG_MODE];
     const char *input_file = argv[ARG_INPUT_FILE];
     const char *output_file = argv[ARG_OUTPUT_FILE];
     const char *key_str = (argc >= ARGS_WITH_KEY) ? argv[ARG_KEY] : NULL;
 
-    const operation_t *mode = find_mode(mode_str);
-    if (!mode)
+    result_t result;
+    if (strcmp(mode, "-s") == 0)
+        result = handle_seal(input_file, output_file, key_str);
+    else if (strcmp(mode, "-o") == 0)
+        result = handle_open(input_file, output_file, key_str);
+    else
     {
-        fprintf(stderr, COLOR_RED "%s Invalid mode - use -s for sealing or -o for opening" COLOR_RESET "\n", SYMBOL_ERROR);
+        print_error("Invalid mode - use -s for sealing or -o for opening");
         print_usage(argv[ARG_PROGRAM_NAME]);
         return EXIT_FAILURE;
     }
-
-    result_t result = mode->handler(input_file, output_file, key_str);
 
     if (result != RESULT_SUCCESS)
         printf("\n" COLOR_RED "%s Operation failed!" COLOR_RESET "\n", SYMBOL_ERROR);
